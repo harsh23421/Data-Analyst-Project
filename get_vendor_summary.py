@@ -10,27 +10,66 @@ logging.basicConfig(
 )
 def create_vendor_summary(conn):
     '''this function will merge the different tables to get overall vendor summary and adding new columns in the resultant data'''
-    vendor_sales_summary=pd.read_sql("""WITH FreightSummary AS(
-         SELECT VendorNumber,SUM(Freight) as FreightCost from vendor_invoice group by VendorNumber),
-         PurchaseSummary AS(
-         SELECT p.VendorNumber,p.VendorName,p.Brand,p.Description,p.PurchasePrice,pp.Price as ActualPrice,pp.Volume,SUM(p.Quantity) as TotalPurchaseQuantity,SUM(p.Dollars) as TotalPurchaseDollars from purchases p join purchase_prices pp on p.Brand=pp.Brand where p.PurchasePrice>0 group by p.VendorNumber,p.VendorName,p.Brand,p.Description,p.PurchasePrice,pp.Price,pp.Volume),
-         SalesSummary as(
-         SELECT VendorNo,Brand,SUM(SalesQuantity) as TotalSalesQuantity,SUM(SalesDollars) as TotalSalesDollars,SUM(SalesPrice) as TotalSalesPrice,SUM(ExciseTax) as TotalExciseTax FROM Sales GROUP BY VendorNo,Brand)
-         SELECT ps.VendorNumber,ps.VendorName,ps.Brand,ps.Description,ps.PurchasePrice,ps.ActualPrice,ps.Volume,ps.TotalPurchaseQuantity,ps.TotalPurchaseDollars,ss.TotalSalesQuantity,ss.TotalSalesDollars,ss.TotalSalesPrice,ss.TotalExciseTax,fs.FreightCost from PurchaseSummary ps left join SalesSummary ss on ps.VendorNumber=ss.VendorNo and ps.Brand=ss.Brand left join FreightSummary fs on ps.VendorNumber=fs.VendorNumber order by ps.TotalPurchaseDollars DESC""",conn)
-    return vendor_sales_summary
+    # REPLACE WITH:
+    query = """
+        WITH FreightSummary AS (
+            SELECT VendorNumber, SUM(Freight) AS FreightCost
+            FROM vendor_invoice
+            GROUP BY VendorNumber
+        ),
+        PurchaseSummary AS (
+            SELECT
+                p.VendorNumber, p.VendorName, p.Brand, p.Description,
+                p.PurchasePrice, pp.Price AS ActualPrice, pp.Volume,
+                SUM(p.Quantity) AS TotalPurchaseQuantity,
+                SUM(p.Dollars)  AS TotalPurchaseDollars
+            FROM purchases p
+            JOIN purchase_prices pp ON p.Brand = pp.Brand
+            WHERE p.PurchasePrice > 0
+            GROUP BY p.VendorNumber, p.VendorName, p.Brand,
+                     p.Description, p.PurchasePrice, pp.Price, pp.Volume
+        ),
+        SalesSummary AS (
+            SELECT VendorNo, Brand,
+                SUM(SalesQuantity) AS TotalSalesQuantity,
+                SUM(SalesDollars)  AS TotalSalesDollars,
+                SUM(SalesPrice)    AS TotalSalesPrice,
+                SUM(ExciseTax)     AS TotalExciseTax
+            FROM Sales
+            GROUP BY VendorNo, Brand
+        )
+        SELECT
+            ps.VendorNumber, ps.VendorName, ps.Brand, ps.Description,
+            ps.PurchasePrice, ps.ActualPrice, ps.Volume,
+            ps.TotalPurchaseQuantity, ps.TotalPurchaseDollars,
+            ss.TotalSalesQuantity, ss.TotalSalesDollars,
+            ss.TotalSalesPrice, ss.TotalExciseTax, fs.FreightCost
+        FROM PurchaseSummary ps
+        LEFT JOIN SalesSummary ss
+            ON ps.VendorNumber = ss.VendorNo AND ps.Brand = ss.Brand
+        LEFT JOIN FreightSummary fs
+            ON ps.VendorNumber = fs.VendorNumber
+        ORDER BY ps.TotalPurchaseDollars DESC
+    """
+    return pd.read_sql(query, conn)
 def clean_data(df):
     '''this function will clean the data'''
     #change datatype to float
-    df['Volume']=df['Volume'].astype('float')
-    df.fillna(0,inplace=True)
-    #removing spaces from categorical columns
-    df['VendorName']=df['VendorName'].str.strip()
-    df['Description']=df['Description'].str.strip()
-    #creating new columns for better analysis
-    vendor_sales_summary['GrossProfit']=vendor_sales_summary['TotalSalesDollars']-vendor_sales_summary['TotalPurchaseDollars']
-    vendor_sales_summary['ProfitMargin']=(vendor_sales_summary['GrossProfit']/vendor_sales_summary['TotalPurchaseDollars'])*100
-    vendor_sales_summary['StockTurnover']=vendor_sales_summary['TotalSalesQuantity']/vendor_sales_summary['TotalPurchaseQuantity']
-    vendor_sales_number['SalesToPurchaseRatio']=vendor_sales_summary['TotalSalesDollars']/vendor_sales_summary['TotalPurchaseDollars']
+    df = df.copy()
+    df['Volume'] = df['Volume'].astype('float')
+    df.fillna(0, inplace=True)
+    df['VendorName'] = df['VendorName'].str.strip()
+    df['Description'] = df['Description'].str.strip()
+    df['GrossProfit'] = df['TotalSalesDollars'] - df['TotalPurchaseDollars']
+    df['ProfitMargin'] = (df['GrossProfit'] / df['TotalPurchaseDollars']) * 100
+    df['StockTurnover'] = df.apply(
+        lambda r: r['TotalSalesQuantity'] / r['TotalPurchaseQuantity']
+        if r['TotalPurchaseQuantity'] > 0 else 0, axis=1
+    )
+    df['SalesToPurchaseRatio'] = df.apply(   # FIXED: was vendor_sales_number (typo)
+        lambda r: r['TotalSalesDollars'] / r['TotalPurchaseDollars']
+        if r['TotalPurchaseDollars'] > 0 else 0, axis=1
+    )
     return df
 if __name__=='__main__':
     #creating database connection
