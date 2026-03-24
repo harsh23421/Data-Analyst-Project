@@ -1,16 +1,101 @@
+# REPLACE entire file with:
 import pandas as pd
 import sqlite3
-conn=sqlite3.connect('inventory.db')
-#checking tables present inside database
-tables=pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'",conn)
-tables
-pd.read_sql("select count(*) from purchases",conn)
-for table in tables['name']:
-    print('-'*50,f'{table}','-'*50)
-    print('Count of Records:',pd.read_sql(f"select count(*) as count from {table}",conn)['count'].values[0])
-    display(pd.read_sql(f"select * from {table}",conn))
-purchases.groupby(['Brand','PurchasePrice'])[['Quantity','Dollars']].sum()
-sales = pd.read_sql("SELECT * FROM sales", conn)
-sales.groupby('Brand')[['SalesDollars','SalesPrice','SalesQuantity']].sum()
-freight_summary=pd.read_sql_query("""select VendorNumber,SUM(Freight) as FreightCost From vendor_invoice Group By VendorNumber""",conn)
-pd.read_sql_query("""select p.VendorNumber,p.VendorName,p.Brand,p.PurchasePrice,SUM(p.Quantity) as totalquantity,SUM(p.Dollars) as totalpurchasedollars,pp.Volume,pp.Price as ActualPrice from purchases p join  purchase_prices pp on p.brand=pp.brand where p.PurchasePrice>0 group by p.VendorNumber,p.VendorName,p.Brand order by totalpurchasedollars """,conn)
+
+conn = sqlite3.connect('inventory.db')
+
+
+def list_tables(conn):
+    """Print all tables present in the database."""
+    tables = pd.read_sql_query(
+        "SELECT name FROM sqlite_master WHERE type='table'", conn
+    )
+    print(f"Found {len(tables)} table(s): {tables['name'].tolist()}\n")
+    return tables
+
+
+def preview_tables(tables, conn):
+    """Display row counts and first 5 rows for every table."""
+    for table in tables['name']:
+        print('-' * 50, table, '-' * 50)
+        count = pd.read_sql(f"SELECT COUNT(*) AS count FROM {table}", conn)['count'].values[0]
+        print(f"Record count: {count}")
+        df = pd.read_sql(f"SELECT * FROM {table} LIMIT 5", conn)
+        print(df.to_string(index=False))
+        print()
+
+
+def analyze_purchases(conn):
+    """Summarise purchase quantities and spend grouped by Brand and PurchasePrice."""
+    purchases = pd.read_sql("SELECT * FROM purchases", conn)   # FIXED: now properly loaded
+    summary = (
+        purchases
+        .groupby(['Brand', 'PurchasePrice'])[['Quantity', 'Dollars']]
+        .sum()
+        .reset_index()
+        .sort_values('Dollars', ascending=False)
+    )
+    print("=== Purchase Summary by Brand & Price ===")
+    print(summary.head(10).to_string(index=False))
+    return summary
+
+
+def analyze_sales(conn):
+    """Summarise sales grouped by Brand."""
+    sales = pd.read_sql("SELECT * FROM sales", conn)
+    summary = (
+        sales
+        .groupby('Brand')[['SalesDollars', 'SalesPrice', 'SalesQuantity']]
+        .sum()
+        .reset_index()
+        .sort_values('SalesDollars', ascending=False)
+    )
+    print("\n=== Sales Summary by Brand ===")
+    print(summary.head(10).to_string(index=False))
+    return summary
+
+
+def analyze_freight(conn):
+    """Summarise total freight cost per vendor."""
+    freight = pd.read_sql_query(
+        """
+        SELECT VendorNumber, SUM(Freight) AS FreightCost
+        FROM vendor_invoice
+        GROUP BY VendorNumber
+        ORDER BY FreightCost DESC
+        """, conn
+    )
+    print("\n=== Freight Cost by Vendor (Top 10) ===")
+    print(freight.head(10).to_string(index=False))
+    return freight
+
+
+def analyze_purchase_vs_actual_price(conn):
+    """Compare purchase price paid vs actual market price by vendor."""
+    df = pd.read_sql_query(
+        """
+        SELECT
+            p.VendorNumber, p.VendorName, p.Brand,
+            p.PurchasePrice, pp.Price AS ActualPrice, pp.Volume,
+            SUM(p.Quantity) AS TotalQuantity,
+            SUM(p.Dollars)  AS TotalPurchaseDollars
+        FROM purchases p
+        JOIN purchase_prices pp ON p.Brand = pp.Brand
+        WHERE p.PurchasePrice > 0
+        GROUP BY p.VendorNumber, p.VendorName, p.Brand
+        ORDER BY TotalPurchaseDollars DESC
+        """, conn
+    )
+    print("\n=== Purchase Price vs Actual Price (Top 10) ===")
+    print(df.head(10).to_string(index=False))
+    return df
+
+
+if __name__ == '__main__':
+    tables = list_tables(conn)
+    preview_tables(tables, conn)
+    analyze_purchases(conn)
+    analyze_sales(conn)
+    analyze_freight(conn)
+    analyze_purchase_vs_actual_price(conn)
+    conn.close()
